@@ -12,6 +12,7 @@ from include.scripts.api.mock_api import MockApi
 from include.scripts.api.api_schema import schema
 
 def check_tables_existence_results(**kwargs):
+    # This function is written to support the branching logic; we only want to create tables if they don't currently exist in the user's database and schema combination
     if kwargs["ti"].xcom_pull(task_ids="check_tables_existence", key="return_value") == []:
         return "create_tables"
     else: 
@@ -20,7 +21,7 @@ def check_tables_existence_results(**kwargs):
 @dag(
     dag_id="refresh_source_data",
     start_date=datetime(2025, 7, 1),
-    schedule=None,
+    schedule=None, # Adjust this as needed; bear in mind that the entire DAG takes about 2 minutes to run usually
     description="This is a pipeline that refreshes the source data from a mock API and writes it to a Snowflake table. Useful to demo the SAO capability of Fusion.",
     template_searchpath=[os.path.join(os.getcwd(), "include", "sql")]
 )
@@ -28,22 +29,6 @@ def refresh_source_data():
 
     client = MockApi()
     sf_client = SnowflakeHook(snowflake_conn_id="fka_snowflake_conn")
-
-    @task(task_id="check_conn")
-    def check_conn():
-        with open("include/sql/check_conn.sql", "r") as file:
-            sql = file.read()
-        sf_client.run(sql=sql)
-
-    check_tables = SQLExecuteQueryOperator(
-        task_id="check_tables_existence",
-        sql="check_tables.sql",
-        params={"database": os.environ.get("SF_DATABASE"), "schema": os.environ.get("SF_SCHEMA")},
-        conn_id="fka_snowflake_conn",
-        split_statements=True,
-        show_return_value_in_logs=True,
-        do_xcom_push=True
-    )
 
     @task_group(group_id="create_tables")
     def create_tables():
@@ -97,7 +82,7 @@ def refresh_source_data():
 
         [create_orders_table, create_products_table, create_customers_table, create_order_products_table]
 
-
+    # these tasks are grouped together to ensure that it can be reused in the two different branches of the DAG (first run and subsequent runs)
     @task_group(group_id="get_regular_data")
     def get_regular_data():
         @task(task_id="get_customers_data")
@@ -120,6 +105,8 @@ def refresh_source_data():
             order_products_df = client.get("order-product")
             client.write_to_csv(order_products_df, file_name="order_products.csv")
 
+        # Customers need to always be fetched first to ensure that the orders data can obtain the correct customer IDs and orders need 
+        # to be fetched before order_products to ensure that the order IDs are correct
         get_customers_data() >> get_orders_data() >> get_order_products_data()
 
     @task_group(group_id="get_first_batch_data")
@@ -129,20 +116,35 @@ def refresh_source_data():
             products_df = client.get("products")
             client.write_to_csv(products_df, file_name="products.csv")
         
+        # Likewise, products need to be fetched first to ensure that subsequent order_products can be obtained with the correct product IDs
+        # We only fetch this for the first run, no point in updating the products as frequently as the other tables
         get_products_data() >> get_regular_data()
 
-    check_conn = SQLExecuteQueryOperator(
-            task_id = "check_conn",
-            sql = "check_conn.sql",
-            conn_id="fka_snowflake_conn",
-            show_return_value_in_logs=True
-        )
+    # Step 1: Check if the connection to Snowflake is working
+    @task(task_id="check_conn")
+    def check_conn():
+        with open("include/sql/check_conn.sql", "r") as file:
+            sql = file.read()
+        sf_client.run(sql=sql)
+
+    # Step 2: Check if the tables already exist in the user's database and schema combination
+    check_tables = SQLExecuteQueryOperator(
+        task_id="check_tables_existence",
+        sql="check_tables.sql",
+        params={"database": os.environ.get("SF_DATABASE"), "schema": os.environ.get("SF_SCHEMA")},
+        conn_id="fka_snowflake_conn",
+        split_statements=True,
+        show_return_value_in_logs=True,
+        do_xcom_push=True
+    )
     
+    # Step 3: Branching logic to determine whether to create tables or not
     branch_check = BranchPythonOperator(
         task_id="branch_check",
         python_callable=check_tables_existence_results
     )
 
+    # These empty operators are created to ensure that the chaining logic can work correctly
     empty_task_1 = EmptyOperator(task_id="empty_task_1")
     empty_task_2 = EmptyOperator(task_id="empty_task_2", trigger_rule="none_failed")
 
@@ -171,33 +173,6 @@ def refresh_source_data():
             table=file_name,
             file_name=file_name + ".csv.gz")
         )
-        
-    # stage_files = [
-    #     SQLExecuteQueryOperator(
-    #         task_id=f"stage_{file_name}",
-    #         sql="stage_files.sql",
-    #         params={
-    #             "database": os.environ.get("SF_DATABASE"),
-    #             "schema": os.environ.get("SF_SCHEMA"),
-    #             "file_name": file_name
-    #         },
-    #         conn_id="fka_snowflake_conn"
-    #     ) for file_name in ti.xcom_pull(task_ids="get_files_list", key="file_list")
-    # ]
-
-    # copy_files = [
-    #     SQLExecuteQueryOperator(
-    #         task_id=f"copy_{file_name}",
-    #         sql="copy_data.sql",
-    #         params={
-    #             "database": os.environ.get("SF_DATABASE"),
-    #             "schema": os.environ.get("SF_SCHEMA"),
-    #             "table": file_name,
-    #             "file_name": file_name
-    #         },
-    #         conn_id="fka_snowflake_conn"
-    #     ) for file_name in ti.xcom_pull(task_ids="get_files_list", key="file_list")
-    # ]
 
     remove_staged_files = SQLExecuteQueryOperator(
         task_id="remove_staged_files",
@@ -210,7 +185,7 @@ def refresh_source_data():
         bash_command="cd /usr/local/airflow && rm -rf include/downloaded_data/*.csv"
     )
 
-    chain(check_conn, check_tables, branch_check, [create_tables(), empty_task_1], [get_first_batch_data(), get_regular_data()], 
+    chain(check_conn(), check_tables, branch_check, [create_tables(), empty_task_1], [get_first_batch_data(), get_regular_data()], 
           empty_task_2)
     files_list = get_files_list()
     stage_files = stage_file.expand(file_name=files_list)
