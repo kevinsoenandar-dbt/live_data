@@ -1,0 +1,1 @@
+PUT file:///usr/local/airflow/include/downloaded_data/{file_name}.csv @~/sao
