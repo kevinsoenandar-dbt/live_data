@@ -6,8 +6,9 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 
 import os
-
+import json
 from pendulum import now, datetime, duration
+
 from include.scripts.api.mock_api import MockApi
 from include.scripts.api.api_schema import schema
 
@@ -17,6 +18,8 @@ def check_tables_existence_results(**kwargs):
         return "create_tables"
     else: 
         return "empty_task_1"
+
+db_conn = json.loads(os.environ.get("AIRFLOW_CONN_FKA_SNOWFLAKE_CONN"))
     
 @dag(
     dag_id="refresh_source_data",
@@ -36,8 +39,8 @@ def refresh_source_data():
             task_id="create_customers_table",
             sql="create_tables.sql",
             params={
-                "database": os.environ.get("SF_DATABASE"),
-                "schema": os.environ.get("SF_SCHEMA"),
+                "database": db_conn["extra"]["database"],
+                "schema": db_conn["schema"],
                 "table_name": "customers",
                 "definitions": schema["customers"]
             },
@@ -48,8 +51,8 @@ def refresh_source_data():
             task_id="create_products_table",
             sql="create_tables.sql",
             params={
-                "database": os.environ.get("SF_DATABASE"),
-                "schema": os.environ.get("SF_SCHEMA"),
+                "database": db_conn["extra"]["database"],
+                "schema": db_conn["schema"],
                 "table_name": "products",
                 "definitions": schema["products"]
             },
@@ -60,8 +63,8 @@ def refresh_source_data():
             task_id="create_orders_table",
             sql="create_tables.sql",
             params={
-                "database": os.environ.get("SF_DATABASE"),
-                "schema": os.environ.get("SF_SCHEMA"),
+                "database": db_conn["extra"]["database"],
+                "schema": db_conn["schema"],
                 "table_name": "orders",
                 "definitions": schema["orders"]
             },
@@ -72,8 +75,8 @@ def refresh_source_data():
             task_id="create_order_products_table",
             sql="create_tables.sql",
             params={
-                "database": os.environ.get("SF_DATABASE"),
-                "schema": os.environ.get("SF_SCHEMA"),
+                "database": db_conn["extra"]["database"],
+                "schema": db_conn["schema"],
                 "table_name": "order_products",
                 "definitions": schema["order_products"]
             },
@@ -131,7 +134,7 @@ def refresh_source_data():
     check_tables = SQLExecuteQueryOperator(
         task_id="check_tables_existence",
         sql="check_tables.sql",
-        params={"database": os.environ.get("SF_DATABASE"), "schema": os.environ.get("SF_SCHEMA")},
+        params={"database": db_conn["extra"]["database"], "schema": db_conn["schema"]},
         conn_id="fka_snowflake_conn",
         split_statements=True,
         show_return_value_in_logs=True,
@@ -168,8 +171,8 @@ def refresh_source_data():
             sql = file.read()
 
         sf_client.run(sql=sql.format(
-            database=os.environ.get("SF_DATABASE"),
-            schema=os.environ.get("SF_SCHEMA"),
+            database= db_conn["extra"]["database"],
+            schema= db_conn["schema"],
             table=file_name,
             file_name=file_name + ".csv.gz")
         )
