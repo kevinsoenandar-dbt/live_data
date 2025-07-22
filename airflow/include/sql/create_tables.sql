@@ -1,3 +1,3 @@
-create table if not exists {database}.{schema}.{table_name} (
-    {definitions}
+create table if not exists {{ params.database }}.{{ params.schema }}.{{ params.table_name }} (
+    {{ params.definitions }}
 );
