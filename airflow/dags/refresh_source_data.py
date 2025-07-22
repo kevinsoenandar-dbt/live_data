@@ -23,11 +23,13 @@ def check_tables_existence_results(ti):
         return "get_existing_customers"
 
 db_conn = json.loads(os.environ.get("AIRFLOW_CONN_FKA_SNOWFLAKE_CONN"))
+
+schedule = int(os.getenv("refresh_source_data_frequency_min")) if os.getenv("refresh_source_data_frequency_min") else None
     
 @dag(
     dag_id="refresh_source_data",
     start_date=datetime(2025, 7, 1),
-    schedule=duration(minutes=int(Variable.get(key="refresh_source_data_frequency_min"))), # Adjust this as needed; bear in mind that the entire DAG takes about 2 minutes to run usually
+    schedule=duration(minutes=schedule) if schedule else None, # Adjust this as needed; bear in mind that the entire DAG takes about 2 minutes to run usually
     description="This is a pipeline that refreshes the source data from a mock API and writes it to a Snowflake table. Useful to demo the SAO capability of Fusion.",
     template_searchpath=[os.path.join(os.getcwd(), "include", "sql")],
     catchup=False,

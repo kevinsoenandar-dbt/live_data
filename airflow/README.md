@@ -37,9 +37,11 @@ git@github.com:kevinsoenandar-dbt/live_data.git
 
 #### Required Environment Variable
 
-You must have a `.env` file in your local directory to ensure that the 
+You must have a `.env` file in your local directory to ensure that the DAG works as expected and is able to pull in required variables. 
 
-You must set the `AIRFLOW_CONN_FKA_SNOWFLAKE_CONN` environment variable. This should be a valid Airflow connection string in JSON format that connects to Snowflake.
+There are 2 environment variables currently:
+1. `AIRFLOW_CONN_FKA_SNOWFLAKE_CONN`; This should be a valid Airflow connection string in JSON format that connects to Snowflake. Sample is provided below
+2. `refresh_source_data_frequency_min` [OPTIONAL]; This is the frequency in **minutes** that you want to set the DAG to refresh at. If not provided, you can just trigger the DAG manually
 
 Example:
 ```
@@ -75,18 +77,6 @@ AIRFLOW_CONN_FKA_SNOWFLAKE_CONN='{
 ```
 
 You can also add this in the Airflow UI under Admin → Connections.
-
----
-
-#### Required Airflow Variables
-
-Create the following Airflow Variable using the UI or the CLI:
-
-| Variable Name                   | Description                                  | Example |
-|-------------------------------|----------------------------------------------|---------|
-| `refresh_source_data_frequency_min` | Frequency (in minutes) the DAG should run. | `30`    |
-
----
 
 ### 4. 🧪 What This DAG Does
 
