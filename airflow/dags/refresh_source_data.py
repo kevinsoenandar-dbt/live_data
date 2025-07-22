@@ -1,4 +1,4 @@
-from airflow.sdk import dag, task, task_group, chain
+from airflow.sdk import dag, task, task_group, chain, Variable
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.standard.operators.python import BranchPythonOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
@@ -27,7 +27,7 @@ db_conn = json.loads(os.environ.get("AIRFLOW_CONN_FKA_SNOWFLAKE_CONN"))
 @dag(
     dag_id="refresh_source_data",
     start_date=datetime(2025, 7, 1),
-    schedule=None, # Adjust this as needed; bear in mind that the entire DAG takes about 2 minutes to run usually
+    schedule=duration(minutes=int(Variable.get(key="refresh_source_data_frequency_min"))), # Adjust this as needed; bear in mind that the entire DAG takes about 2 minutes to run usually
     description="This is a pipeline that refreshes the source data from a mock API and writes it to a Snowflake table. Useful to demo the SAO capability of Fusion.",
     template_searchpath=[os.path.join(os.getcwd(), "include", "sql")]
 )
