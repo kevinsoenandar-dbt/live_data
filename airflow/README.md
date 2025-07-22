@@ -1,45 +1,144 @@
-Overview
-========
+# Sample live-refreshing data with Airflow to simulate real world pipeline and to demo SAO
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+This DAG is used to simulate data ingestion from a mock API (in this instance, we are just using some Python libraries to generate mock data) and load the data into Snowflake tables. It can be used for demonstrations and development testing purposes, especially for features like Fusion's SAO capability. The Airflow instance can be started and stopped with one simple command to support any demo.
 
-Project Contents
-================
+---
 
-Your Astro project contains the following files and folders:
+## 🚀 Quick Start Guide
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes one example DAG:
-    - `example_astronauts`: This DAG shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The DAG uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this DAG works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+### 1. 📦 Prerequisites
 
-Deploy Your Project Locally
-===========================
+Make sure you have the following installed:
 
-Start Airflow on your local machine by running 'astro dev start'.
+- **Python 3.x+**
+- [**Astro CLI**](https://www.astronomer.io/docs/astro/cli/overview/)
+    - Note that the Astro CLI will automatically install Podman as a dependency. Podman is a Docker alternative that (seems to be) more resource efficient when running on your local machine.
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+---
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- DAG Processor: The Airflow component responsible for parsing DAGs
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+### 2. 🔧 Setup and Installation
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+#### Clone this repository:
+https:
+```
+https://github.com/kevinsoenandar-dbt/live_data.git
+```
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+or 
 
-Deploy Your Project to Astronomer
-=================================
+SSH:
+```
+git@github.com:kevinsoenandar-dbt/live_data.git
+```
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
+---
 
-Contact
-=======
+### 3. ⚙️ Environment Variables and Airflow Variables
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+#### Required Environment Variable
+
+You must have a `.env` file in your local directory to ensure that the 
+
+You must set the `AIRFLOW_CONN_FKA_SNOWFLAKE_CONN` environment variable. This should be a valid Airflow connection string in JSON format that connects to Snowflake.
+
+Example:
+```
+AIRFLOW_CONN_FKA_SNOWFLAKE_CONN='{
+  "conn_type": "snowflake",
+  "login": "YOUR_USER",
+  "password": "YOUR_PASSWORD",
+  "extra": {
+    "account": "YOUR_ACCOUNT",
+    "database": "YOUR_DB",
+    "warehouse": "YOUR_WAREHOUSE",
+    "role": "YOUR_ROLE"
+  },
+  "schema": "YOUR_SCHEMA"
+}'
+```
+
+For reference, I used the following settings:
+
+```
+AIRFLOW_CONN_FKA_SNOWFLAKE_CONN='{
+    "conn_type": "snowflake",
+    "login": "dbtlabs_ksoenandar",
+    "password": "<password>",
+    "schema": "dbt_ksoenandar_raw",
+    "extra": {
+        "account": "fka50167",
+        "database": "analytics",
+        "warehouse": "transforming",
+        "role": "transformer"
+    }
+}'
+```
+
+You can also add this in the Airflow UI under Admin → Connections.
+
+---
+
+#### Required Airflow Variables
+
+Create the following Airflow Variable using the UI or the CLI:
+
+| Variable Name                   | Description                                  | Example |
+|-------------------------------|----------------------------------------------|---------|
+| `refresh_source_data_frequency_min` | Frequency (in minutes) the DAG should run. | `30`    |
+
+---
+
+### 4. 🧪 What This DAG Does
+
+This DAG:
+1. Checks connection to Snowflake.
+2. Checks if necessary tables exist.
+3. Creates missing tables (if any).
+4. Seeds mock data using `MockData` class.
+5. Uploads and loads `.csv.gz` files into Snowflake using SQL scripts.
+6. Cleans up local and staged files after loading.
+
+---
+
+### 5. 🗃️ File Structure Overview
+
+```text
+dags/
+└── refresh_source_data.py     # Main DAG logic
+
+include/
+├── sql/                       # SQL scripts used in the DAG
+│   ├── create_tables.sql
+│   ├── check_conn.sql
+│   ├── sample_table.sql
+│   ├── stage_files.sql
+│   └── copy_data.sql
+├── scripts/
+│   ├── api/
+│   │   ├── mock_data.py       # Generates mock data
+│   │   └── mock_schema.py     # Defines table schemas
+└── generated_data/            # Temporary folder for generated CSVs
+```
+
+---
+
+### 6. 🧹 Clean-up
+
+After the DAG finishes:
+- Files in `include/generated_data/` (except `products.csv`) are deleted locally. The `products.csv` file is stored to be re-used for subsequent runs.
+- Snowflake stage `@~/sao/` is cleaned up. This stage lives in your Snowflake's user stage. 
+
+---
+
+### 7. 🛠️ Tips for Development
+
+- Start the Airflow instance with the `astro dev start` command.
+- You can use `astro dev restart` to restart Airflow after code changes.
+- Use the Airflow UI (`http://localhost:8080`) to monitor the DAG run.
+- Use logs to troubleshoot any operator failures.
+
+---
+
+### ✅ That's it!
+
+You're now ready to use and customize the `refresh_source_data` DAG for your own development or demo purposes.
