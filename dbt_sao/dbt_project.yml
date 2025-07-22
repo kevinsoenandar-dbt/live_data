@@ -34,4 +34,3 @@ models:
     # Config indicated by + and applies to all files under models/example/
     mart:
       +materialized: table
-      +schema: mart
