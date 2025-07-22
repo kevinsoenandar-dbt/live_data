@@ -1,0 +1,55 @@
+version: 2
+
+sources:
+  - name: bike_shop
+    database: analytics
+    schema: dbt_ksoenandar_raw
+    description: Mock data for the newly-created bike shop
+    tables:
+      - name: customers
+        description: One record per person who has purchased one or more items
+        columns:
+          - name: id
+            data_tests:
+              - not_null
+              - unique
+      - name: orders
+        description: One record per order (consisting of one or more order items)
+        columns:
+          - name: id
+            data_tests:
+              - not_null
+              - unique
+          - name: customer_id
+            data_tests:
+              - not_null
+              - unique
+              - relationships:
+                  field: id
+                  to: source("bike_shop", "customers")
+      - name: order_products
+        description: One record per product that is part of an order
+        columns:
+          - name: id
+            data_tests:
+              - not_null
+              - unique
+          - name: product_id
+            data_tests:
+            - not_null
+            - relationships:
+                field: id
+                to: source("bike_shop", "products")
+          - name: order_id
+            data_tests:
+            - not_null
+            - relationships:
+                field: id
+                to: source("bike_shop", "orders")
+      - name: products
+        description: One record per SKU for items sold in stores
+        columns:
+          - name: id
+            data_tests:
+              - not_null
+              - unique

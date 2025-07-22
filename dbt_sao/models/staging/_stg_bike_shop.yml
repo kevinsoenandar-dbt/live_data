@@ -1,0 +1,17 @@
+models:
+  - name: stg_bike_shop__customers
+    description: Customer data with basic cleaning and transformation applied, one row per customer.
+    columns:
+      - name: customer_gender
+        data_tests:
+          - accepted_values:
+              values:
+                - Male
+                - Female
+                - Non-binary
+  - name: stg_bike_shop__order_products
+    description: Individual products that make up an order, one row per product.
+  - name: stg_bike_shop__orders
+    description: Order data with basic cleaning and transformation applied, one row per order.
+  - name: stg_bike_shop__products
+    description: Product data with basic cleaning and transformation applied, one row per product.

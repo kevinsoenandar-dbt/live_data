@@ -1,0 +1,35 @@
+models:
+  - name: fct_order_products
+    columns:
+      - name: order_product_id
+        data_tests:
+          - not_null
+          - unique
+      - name: order_id
+        data_tests:
+          - not_null
+      - name: customer_id
+        data_tests:
+          - not_null
+  - name: dim_order
+    columns:
+      - name: order_id
+        description: The unique key of the dim_order table.
+      - name: order_status
+        description: The status of the order.
+      - name: order_date
+        description: The date that order was placed.
+  - name: dim_product
+    columns:
+      - name: product_id
+      - name: product_name
+      - name: product_material
+      - name: product_category
+      - name: product_subcategory
+  - name: dim_customer
+    columns:
+      - name: customer_id
+      - name: customer_first_name
+      - name: customer_last_name
+      - name: customer_gender
+      - name: customer_city
