@@ -9,15 +9,18 @@ import os
 import json
 from pendulum import now, datetime, duration
 
-from include.scripts.api.mock_api import MockApi
-from include.scripts.api.api_schema import schema
+import logging
+logger = logging.getLogger(__name__)
 
-def check_tables_existence_results(**kwargs):
+from include.scripts.api.mock_data import MockData
+from include.scripts.api.mock_schema import schema
+
+def check_tables_existence_results(ti):
     # This function is written to support the branching logic; we only want to create tables if they don't currently exist in the user's database and schema combination
-    if kwargs["ti"].xcom_pull(task_ids="check_tables_existence", key="return_value") == []:
+    if len(ti.xcom_pull(task_ids="check_tables_existence", key="return_value")) == 0:
         return "create_tables"
     else: 
-        return "empty_task_1"
+        return "get_existing_customers"
 
 db_conn = json.loads(os.environ.get("AIRFLOW_CONN_FKA_SNOWFLAKE_CONN"))
     
@@ -30,7 +33,7 @@ db_conn = json.loads(os.environ.get("AIRFLOW_CONN_FKA_SNOWFLAKE_CONN"))
 )
 def refresh_source_data():
 
-    client = MockApi()
+    client = MockData()
     sf_client = SnowflakeHook(snowflake_conn_id="fka_snowflake_conn")
 
     @task_group(group_id="create_tables")
@@ -85,43 +88,17 @@ def refresh_source_data():
 
         [create_orders_table, create_products_table, create_customers_table, create_order_products_table]
 
-    # these tasks are grouped together to ensure that it can be reused in the two different branches of the DAG (first run and subsequent runs)
-    @task_group(group_id="get_regular_data")
-    def get_regular_data():
-        @task(task_id="get_customers_data")
-        def get_customers_data():
-            customers_df = client.get("customers")
-            client.write_to_csv(customers_df, file_name="customers.csv")
-        
-        @task(task_id="get_orders_data")
-        def get_orders_data():
-            current_time = now()
-            params = {
-                "min_order_date": (current_time - duration(days=30)).strftime("%m/%d/%Y"),
-                "max_order_date": (current_time - duration(hours=1)).strftime("%m/%d/%Y")
-            }
-            orders_df = client.get("orders",params=params)
-            client.write_to_csv(orders_df, file_name="orders.csv")
+    @task(task_id="get_initial_data")
+    def get_initial_data(ti):
+        client.seed_initial_data()
+        ti.xcom_push(key="initial_run", value=True)
     
-        @task(task_id="get_order_products_data")
-        def get_order_products_data():
-            order_products_df = client.get("order-product")
-            client.write_to_csv(order_products_df, file_name="order_products.csv")
-
-        # Customers need to always be fetched first to ensure that the orders data can obtain the correct customer IDs and orders need 
-        # to be fetched before order_products to ensure that the order IDs are correct
-        get_customers_data() >> get_orders_data() >> get_order_products_data()
-
-    @task_group(group_id="get_first_batch_data")
-    def get_first_batch_data():
-        @task(task_id="get_products_data")
-        def get_products_data():
-            products_df = client.get("products")
-            client.write_to_csv(products_df, file_name="products.csv")
-        
-        # Likewise, products need to be fetched first to ensure that subsequent order_products can be obtained with the correct product IDs
-        # We only fetch this for the first run, no point in updating the products as frequently as the other tables
-        get_products_data() >> get_regular_data()
+    @task(task_id="get_regular_data")
+    def get_regular_data(ti):
+        xcom_message = ti.xcom_pull(key="return_value", task_ids="get_existing_customers")
+        existing_customers = [item[0] for item in xcom_message]
+        client.refresh_data(existing_customers, 1000, 950)
+        ti.xcom_push(key="initial_run", value=False)
 
     # Step 1: Check if the connection to Snowflake is working
     @task(task_id="check_conn")
@@ -147,13 +124,29 @@ def refresh_source_data():
         python_callable=check_tables_existence_results
     )
 
+    # Step 4: Get existing customers to populate new orders with SOME existing customers
+    get_existing_customers = SQLExecuteQueryOperator(
+        task_id = "get_existing_customers",
+        sql="sample_table.sql",
+        params={
+            "database": db_conn["extra"]["database"],
+            "schema": db_conn["schema"],
+            "table_name": "customers"
+        },
+        conn_id="fka_snowflake_conn"
+    )
+
     # These empty operators are created to ensure that the chaining logic can work correctly
-    empty_task_1 = EmptyOperator(task_id="empty_task_1")
-    empty_task_2 = EmptyOperator(task_id="empty_task_2", trigger_rule="none_failed")
+    empty_task = EmptyOperator(task_id="empty_task", trigger_rule="none_failed")
 
     @task(task_id="get_files_list")
     def get_files_list(ti):
-        for dir, subdir, files in os.walk(os.path.join(os.getcwd(), "include", "downloaded_data")):
+        initial_run = ti.xcom_pull(key="initial_run", task_ids="get_initial_data") or ti.xcom_pull(key="initial_run", task_ids="get_regular_data")
+        logger.info(f"Is an initial run: {initial_run}")
+        for dir, subdir, files in os.walk(os.path.join(os.getcwd(), "include", "generated_data")):
+            if not initial_run:
+                # Products dataset is static and so there's no need to refresh it constantly. 
+                files.remove("products.csv")
             return [file[:len(file)-4] for file in files]
 
     @task(task_id="stage_file")
@@ -185,13 +178,13 @@ def refresh_source_data():
 
     clean_local_files = BashOperator(
         task_id="clean_files", 
-        bash_command="cd /usr/local/airflow && rm -rf include/downloaded_data/*.csv"
+        bash_command="cd /usr/local/airflow && find ./include/generated_data/ ! -name 'products.csv' -type f -exec rm -f {} +"
     )
 
-    chain(check_conn(), check_tables, branch_check, [create_tables(), empty_task_1], [get_first_batch_data(), get_regular_data()], 
-          empty_task_2)
+    chain(check_conn(), check_tables, branch_check, [create_tables(), get_existing_customers], [get_initial_data(), get_regular_data()], 
+          empty_task)
     files_list = get_files_list()
     stage_files = stage_file.expand(file_name=files_list)
-    empty_task_2 >> files_list >> stage_files >> copy_file.expand(file_name=stage_files) >> remove_staged_files >> clean_local_files
+    empty_task >> files_list >> stage_files >> copy_file.expand(file_name=stage_files) >> remove_staged_files >> clean_local_files
 
 refresh_source_data()

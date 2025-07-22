@@ -1,3 +1,5 @@
 # Astro Runtime includes the following pre-installed providers packages: https://www.astronomer.io/docs/astro/runtime-image-architecture#provider-packages
 apache-airflow-providers-snowflake==6.5.0
 polars==1.31.0
+Faker==37.4.2
+scipy==1.16.0

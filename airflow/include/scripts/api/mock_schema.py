@@ -5,17 +5,18 @@ schema = {
         last_name string,
         email string,
         gender string,
-        state string,
         city string,
         loaded_at timestamp_ntz
     """,
     "products": """
         id string,
-        name string,
+        model string,
         category string,
         subcategory string,
+        frame string,
         price float,
-        product_cost float
+        product_cost float,
+        loaded_at timestamp_ntz
     """,
     "orders": """
         id string,
